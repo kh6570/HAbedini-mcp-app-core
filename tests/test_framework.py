@@ -22,7 +22,7 @@ from sample_services.widgets.make_widget import make_widget
 
 def test_sandbox_rejects_escape(tmp_path: Path) -> None:
     with pytest.raises(SandboxViolationError):
-        resolve_workspace_path(Path("C:/Windows/notepad.exe"), workspace_root=tmp_path)
+        resolve_workspace_path(tmp_path.parent / "outside-workspace.txt", workspace_root=tmp_path)
 
 
 def test_budget_rejects_tiny_cap() -> None:
