@@ -7,6 +7,7 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 
 import structlog
 
@@ -36,7 +37,7 @@ def _is_alive_windows(pid: int) -> bool:
         kernel32.CloseHandle(handle)
 
 
-def _is_alive_posix(pid: int) -> bool:
+def _posix_kill_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -46,6 +47,32 @@ def _is_alive_posix(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def _linux_proc_state(pid: int) -> str | None:
+    """Return the /proc state letter. ``None`` means /proc could not be read."""
+
+    try:
+        data = Path(f"/proc/{pid}/stat").read_text(encoding="ascii", errors="replace")
+    except FileNotFoundError:
+        return "X"
+    except OSError:
+        return None
+    try:
+        return data.rsplit(")", 1)[1].split(None, 1)[0]
+    except (IndexError, ValueError):
+        return None
+
+
+def _is_alive_posix(pid: int) -> bool:
+    # A zombie still answers kill(pid, 0). The parent has exited, so the
+    # watchdog must stop waiting or it loops until the process is reaped.
+    if Path("/proc").is_dir():
+        state = _linux_proc_state(pid)
+        if state is None:
+            return _posix_kill_alive(pid)
+        return state not in {"Z", "X"}
+    return _posix_kill_alive(pid)
 
 
 def is_process_alive(pid: int) -> bool:
