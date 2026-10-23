@@ -60,6 +60,8 @@ def register_tools(
     """Register implemented tools and stamp their JSON schemas."""
 
     for tool in tools:
+        # An output schema on the spec stays advisory. Structured output stays
+        # off so existing dict results are not validated or rejected.
         app.tool(
             name=tool.name,
             title=tool.title,

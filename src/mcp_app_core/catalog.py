@@ -10,12 +10,32 @@ from types import ModuleType
 from typing import Literal
 
 ServicePhase = Literal["planned", "implemented"]
+ServiceProfile = Literal["default", "extended"]
+SERVICE_PROFILES: tuple[ServiceProfile, ...] = ("default", "extended")
+# Remote simulation, batch runs, live GUI, and topology ingest.
+EXTENDED_PROFILE_AREAS = frozenset({"remote", "batch", "live_gui", "topology_ingest"})
 _SKIP_MODULES = frozenset({"operations", "mcp_contracts"})
+
+
+def profile_for_area(area: str) -> ServiceProfile:
+    """Return the profile for one capability area.
+
+    ``remote``, ``batch``, ``live_gui``, and ``topology_ingest`` are extended.
+    Typed edit, simulate, and measure areas stay on the default profile.
+    """
+
+    if area in EXTENDED_PROFILE_AREAS:
+        return "extended"
+    return "default"
 
 
 @dataclass(frozen=True, slots=True)
 class ServiceSpec:
-    """Metadata for one application service."""
+    """Metadata for one application service.
+
+    ``profile`` selects the tool group a server loads. ``output_schema`` is
+    optional metadata and does not by itself turn on structured tool output.
+    """
 
     name: str
     title: str
@@ -27,6 +47,15 @@ class ServiceSpec:
     idempotent: bool | None = None
     description: str | None = None
     input_schema: dict[str, object] | None = None
+    profile: ServiceProfile = "default"
+    output_schema: dict[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        raw_profile: object = self.profile
+        if raw_profile not in {"default", "extended"}:
+            raise ValueError(f"Unknown service profile {raw_profile!r}.")
+        if self.output_schema is not None:
+            object.__setattr__(self, "output_schema", dict(self.output_schema))
 
 
 def load_contracts(package_name: str) -> dict[str, dict[str, object]]:
@@ -42,8 +71,32 @@ def load_contracts(package_name: str) -> dict[str, dict[str, object]]:
     return {str(key): value for key, value in contracts.items() if isinstance(value, dict)}
 
 
+def _profile_from_contract(spec: ServiceSpec, contract: dict[str, object]) -> ServiceProfile:
+    if "profile" not in contract:
+        return spec.profile
+    raw = contract["profile"]
+    if raw == "default":
+        return "default"
+    if raw == "extended":
+        return "extended"
+    raise ValueError(f"Unknown service profile {raw!r} for {spec.name!r}.")
+
+
+def _output_schema_from_contract(
+    spec: ServiceSpec, contract: dict[str, object]
+) -> dict[str, object] | None:
+    if "output_schema" not in contract:
+        return spec.output_schema
+    raw = contract["output_schema"]
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise TypeError(f"output_schema for {spec.name!r} must be a dictionary.")
+    return {str(key): value for key, value in raw.items()}
+
+
 def enrich_spec(spec: ServiceSpec, contract: dict[str, object] | None) -> ServiceSpec:
-    """Copy title, description, and input schema from a contract row."""
+    """Copy title, description, schemas, and profile from a contract row."""
 
     if contract is None:
         return spec
@@ -53,6 +106,8 @@ def enrich_spec(spec: ServiceSpec, contract: dict[str, object] | None) -> Servic
         title=str(contract.get("title", spec.title)),
         description=str(contract.get("description", spec.summary)),
         input_schema=dict(input_schema) if isinstance(input_schema, dict) else spec.input_schema,
+        output_schema=_output_schema_from_contract(spec, contract),
+        profile=_profile_from_contract(spec, contract),
     )
 
 

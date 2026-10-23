@@ -127,4 +127,10 @@ def error_payload(error: AppError) -> dict[str, object]:
         payload["exit_code"] = exit_code
     if isinstance(stderr, str):
         payload["stderr"] = stderr
+    expected_hash = getattr(error, "expected_hash", None)
+    actual_hash = getattr(error, "actual_hash", None)
+    if isinstance(expected_hash, str):
+        payload["expected_hash"] = expected_hash
+    if isinstance(actual_hash, str):
+        payload["actual_hash"] = actual_hash
     return payload

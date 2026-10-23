@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
-from mcp_app_core.catalog import ServiceSpec
+from mcp_app_core.catalog import SERVICE_PROFILES, ServiceSpec
 
 _WORKSPACE_PROPERTY: dict[str, object] = {
     "type": "string",
@@ -33,6 +34,11 @@ class ToolDefinition:
     input_schema: dict[str, object]
     annotations: ToolAnnotations
     service: ServiceSpec
+    output_schema: dict[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        if self.output_schema is not None:
+            object.__setattr__(self, "output_schema", dict(self.output_schema))
 
     def summary(self) -> dict[str, object]:
         """Return a JSON-serializable summary."""
@@ -43,6 +49,7 @@ class ToolDefinition:
             "description": self.description,
             "read_only": self.annotations.read_only_hint,
             "long_running": self.service.long_running,
+            "profile": self.service.profile,
         }
 
 
@@ -76,15 +83,37 @@ def normalize_input_schema(input_schema: dict[str, object]) -> dict[str, object]
     return schema
 
 
+def _active_profiles(active_profiles: Collection[str] | None) -> frozenset[str] | None:
+    if active_profiles is None:
+        return None
+    if isinstance(active_profiles, str):
+        raise TypeError("active_profiles must be a collection of profile names.")
+    allowed = frozenset(active_profiles)
+    unknown = sorted(allowed.difference(SERVICE_PROFILES))
+    if unknown:
+        names = ", ".join(unknown)
+        raise ValueError(f"Unknown service profile(s): {names}.")
+    return allowed
+
+
 def build_tool_registry(
     specs: tuple[ServiceSpec, ...],
     *,
     open_world_names: frozenset[str] = frozenset(),
+    active_profiles: Collection[str] | None = None,
 ) -> tuple[ToolDefinition, ...]:
-    """Build tool definitions. Specs without a schema are rejected."""
+    """Build tool definitions. Specs without a schema are rejected.
 
+    Omit ``active_profiles`` to include every spec. Pass a collection of
+    ``default`` and ``extended`` to load that subset. A spec outside the
+    active set is skipped before its input schema is required.
+    """
+
+    allowed = _active_profiles(active_profiles)
     tools: list[ToolDefinition] = []
     for spec in specs:
+        if allowed is not None and spec.profile not in allowed:
+            continue
         if spec.input_schema is None:
             raise KeyError(f"Missing MCP input_schema for service {spec.name!r}.")
         tools.append(
@@ -95,6 +124,7 @@ def build_tool_registry(
                 input_schema=normalize_input_schema(dict(spec.input_schema)),
                 annotations=resolve_tool_annotations(spec, open_world_names=open_world_names),
                 service=spec,
+                output_schema=spec.output_schema,
             )
         )
     return tuple(tools)

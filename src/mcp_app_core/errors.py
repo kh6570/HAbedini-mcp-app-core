@@ -54,6 +54,24 @@ class ArtifactMissingError(AppError):
     default_error_code = "artifact_missing"
 
 
+class ContentConflictError(AppError):
+    """File contents changed since the recorded content hash."""
+
+    default_error_code = "content_conflict"
+
+    def __init__(
+        self,
+        message: str = "Refusing to write the file because its content hash does not match.",
+        *,
+        expected_hash: str,
+        actual_hash: str,
+        error_code: str | None = None,
+    ) -> None:
+        super().__init__(message, error_code=error_code)
+        self.expected_hash = expected_hash
+        self.actual_hash = actual_hash
+
+
 class ParseError(AppError):
     """A text or binary artifact could not be parsed."""
 
@@ -134,6 +152,13 @@ SHARED_ERROR_CODES: tuple[ErrorCodeDefinition, ...] = (
         summary="An expected file was not created or could not be found.",
         status="implemented",
         mapped_exceptions=("ArtifactMissingError",),
+    ),
+    ErrorCodeDefinition(
+        code="content_conflict",
+        title="Content Conflict",
+        summary="A file changed since its content hash was read, so it was not written.",
+        status="implemented",
+        mapped_exceptions=("ContentConflictError",),
     ),
     ErrorCodeDefinition(
         code="parse_failed",
